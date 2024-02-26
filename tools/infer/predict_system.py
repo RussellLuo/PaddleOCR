@@ -64,7 +64,7 @@ class TextSystem(object):
             logger.debug(f"{bno}, {rec_res[bno]}")
         self.crop_image_res_index += bbox_num
 
-    def __call__(self, img, cls=True):
+    def __call__(self, img, cls=True, dt_boxes=None):
         time_dict = {'det': 0, 'rec': 0, 'cls': 0, 'all': 0}
 
         if img is None:
@@ -73,8 +73,11 @@ class TextSystem(object):
 
         start = time.time()
         ori_im = img.copy()
-        dt_boxes, elapse = self.text_detector(img)
-        time_dict['det'] = elapse
+
+        elapse = 0
+        if dt_boxes is None:
+            dt_boxes, elapse = self.text_detector(img)
+            time_dict['det'] = elapse
 
         if dt_boxes is None:
             logger.debug("no dt_boxes found, elapsed : {}".format(elapse))

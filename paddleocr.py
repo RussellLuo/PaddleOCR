@@ -55,7 +55,7 @@ from ppstructure.predict_system import StructureSystem, save_structure_res, to_e
 logger = get_logger()
 __all__ = [
     'PaddleOCR', 'PPStructure', 'draw_ocr', 'draw_structure_result',
-    'save_structure_res', 'download_with_progressbar', 'to_excel'
+    'save_structure_res', 'download_with_progressbar', 'to_excel', 'check_img'
 ]
 
 SUPPORT_DET_MODEL = ['DB']
@@ -64,11 +64,32 @@ SUPPORT_REC_MODEL = ['CRNN', 'SVTR_LCNet']
 BASE_DIR = os.path.expanduser("~/.paddleocr/")
 
 DEFAULT_OCR_MODEL_VERSION = 'PP-OCRv4'
-SUPPORT_OCR_MODEL_VERSION = ['PP-OCR', 'PP-OCRv2', 'PP-OCRv3', 'PP-OCRv4']
+SUPPORT_OCR_MODEL_VERSION = ['PP-OCR', 'PP-OCRv2', 'PP-OCRv3', 'PP-OCRv4', 'PP-OCRv4-server']
 DEFAULT_STRUCTURE_MODEL_VERSION = 'PP-StructureV2'
 SUPPORT_STRUCTURE_MODEL_VERSION = ['PP-Structure', 'PP-StructureV2']
 MODEL_URLS = {
     'OCR': {
+        'PP-OCRv4-server': {
+            'det': {
+                'ch': {
+                    'url':
+                    'https://paddle-model-ecology.bj.bcebos.com/paddlex/inference_models/ocr/ch_PP-OCRv4_det_server_infer.tar',
+                },
+            },
+            'rec': {
+                'ch': {
+                    'url':
+                    'https://paddle-model-ecology.bj.bcebos.com/paddlex/inference_models/ocr/ch_PP-OCRv4_rec_server_infer.tar',
+                    'dict_path': './ppocr/utils/ppocr_keys_v1.txt'
+                },
+            },
+            'cls': {
+                'ch': {
+                    'url':
+                        'https://paddleocr.bj.bcebos.com/dygraph_v2.0/ch/ch_ppocr_mobile_v2.0_cls_infer.tar',
+                }
+            },
+        },
         'PP-OCRv4': {
             'det': {
                 'ch': {
@@ -623,7 +644,8 @@ class PaddleOCR(predict_system.TextSystem):
             cls=True,
             bin=False,
             inv=False,
-            alpha_color=(255, 255, 255)):
+            alpha_color=(255, 255, 255),
+            dt_boxes=None):
         """
         OCR with PaddleOCR
         args：
@@ -634,6 +656,7 @@ class PaddleOCR(predict_system.TextSystem):
             bin: binarize image to black and white. Default is False.
             inv: invert image colors. Default is False.
             alpha_color: set RGB color Tuple for transparent parts replacement. Default is pure white.
+            dt_boxes: user-specified bounding boxes for OCR. If None, the boxes will be detected automatically.
         """
         assert isinstance(img, (np.ndarray, list, str, bytes))
         if isinstance(img, list) and det == True:
@@ -665,7 +688,7 @@ class PaddleOCR(predict_system.TextSystem):
             ocr_res = []
             for idx, img in enumerate(imgs):
                 img = preprocess_image(img)
-                dt_boxes, rec_res, _ = self.__call__(img, cls)
+                dt_boxes, rec_res, _ = self.__call__(img, cls, dt_boxes=dt_boxes)
                 if not dt_boxes and not rec_res:
                     ocr_res.append(None)
                     continue
