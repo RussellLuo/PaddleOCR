@@ -54,7 +54,7 @@ from ppstructure.predict_system import StructureSystem, save_structure_res, to_e
 
 logger = get_logger()
 __all__ = [
-    'PaddleOCR', 'PPStructure', 'draw_ocr', 'draw_structure_result',
+    'PaddleOCR', 'PPStructure', 'PPStructureX', 'draw_ocr', 'draw_structure_result',
     'save_structure_res', 'download_with_progressbar', 'to_excel', 'check_img'
 ]
 
@@ -791,6 +791,88 @@ class PPStructure(StructureSystem):
         return res
 
 
+class PPStructureX:
+    """PPStructureX behaves like PPStructure but usually has higher OCR recognition accuracy."""
+
+    def __init__(self, **kwargs):
+        """
+        args:
+            **kwargs: other params show in `paddleocr --help`
+        """
+        params = parse_args(mMain=False)
+        params.__dict__.update(**kwargs)
+        self._do_ocr = params.ocr
+
+        if self._do_ocr:
+            # If OCR is enabled, we first initialize a structure engine without
+            # enabling OCR, and then initialize a standalone OCR engine.
+            kwargs.pop('ocr', None)
+            self._structure_engine = PPStructure(ocr=False, **kwargs)
+            self._ocr_engine = PaddleOCR(**kwargs)
+        else:
+            # Init a structure engine with the raw parameters.
+            self._structure_engine = PPStructure(**kwargs)
+
+    def __call__(self, img, return_ocr_result_in_table=False, img_idx=0):
+        if not self._do_ocr:
+            return self._structure_engine(img, return_ocr_result_in_table, img_idx)
+
+        # We first detect all text regions by the OCR engine.
+        dt_boxes, elapse = self._ocr_engine.text_detector(img)
+
+        # Then do layout analysis by the structure engine.
+        result = self._structure_engine(img, return_ocr_result_in_table, img_idx)
+        for r in result:
+            # Ignore tables since they are parsed separately by the internal table model.
+            if r['type'] == 'table':
+                continue
+
+            # Keep only the regions that intersect with the current bbox.
+            r_dt_boxes = self._filter_boxes(dt_boxes, r['bbox'])
+
+            # Perform OCR recognition on texts within the these regions.
+            ocr_result = self._ocr_engine.ocr(img, dt_boxes=r_dt_boxes)
+            if ocr_result:
+                ocr_r = ocr_result[0]
+                if ocr_r: # Sometimes ocr_r might be None.
+                    r['res'] = [
+                        dict(
+                            text_region=x[0],
+                            text=x[1][0],
+                            confidence=x[1][1],
+                        )
+                        for x in ocr_r
+                    ]
+
+        # Sort the text boxes in order from top to bottom and from left to right.
+        from ppstructure.recovery.recovery_to_doc import sorted_layout_boxes
+        h, w, _ = img.shape
+        sorted_result = sorted_layout_boxes(result, w)
+
+        return sorted_result
+
+    def _filter_boxes(self, dt_boxes, bbox):
+        boxes = []
+
+        for idx in range(len(dt_boxes)):
+            box = dt_boxes[idx]
+            rect = box[0][0], box[0][1], box[2][0], box[2][1]
+            if self._has_intersection(bbox, rect):
+                boxes.append(box.tolist())
+
+        return np.array(boxes, np.float32).reshape((len(boxes), 4, 2))
+
+    def _has_intersection(self, rect1, rect2):
+        # TODO: Performance needs improvement.
+        xmin1, ymin1, xmax1, ymax1 = rect1
+        xmin2, ymin2, xmax2, ymax2 = rect2
+        if xmin1 > xmax2 or xmax1 < xmin2:
+            return False
+        if ymin1 > ymax2 or ymax1 < ymin2:
+            return False
+        return True
+
+
 def main():
     # for cmd
     args = parse_args(mMain=True)
@@ -807,6 +889,8 @@ def main():
         engine = PaddleOCR(**(args.__dict__))
     elif args.type == 'structure':
         engine = PPStructure(**(args.__dict__))
+    elif args.type == 'structurex':
+        engine = PPStructureX(**(args.__dict__))
     else:
         raise NotImplementedError
 
@@ -826,7 +910,7 @@ def main():
                     res = result[idx]
                     for line in res:
                         logger.info(line)
-        elif args.type == 'structure':
+        elif args.type in ('structure', 'structurex'):
             img, flag_gif, flag_pdf = check_and_read(img_path)
             if not flag_gif and not flag_pdf:
                 img = cv2.imread(img_path)
