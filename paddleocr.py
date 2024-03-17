@@ -801,9 +801,9 @@ class PPStructureX:
         """
         params = parse_args(mMain=False)
         params.__dict__.update(**kwargs)
-        self._do_ocr = params.ocr
+        self._args = params
 
-        if self._do_ocr:
+        if self._args.ocr:
             # If OCR is enabled, we first initialize a structure engine without
             # enabling OCR, and then initialize a standalone OCR engine.
             kwargs.pop('ocr', None)
@@ -814,13 +814,13 @@ class PPStructureX:
             self._structure_engine = PPStructure(**kwargs)
 
     def __call__(self, img, return_ocr_result_in_table=False, img_idx=0):
-        if not self._do_ocr:
+        if not self._args.ocr:
             return self._structure_engine(img, return_ocr_result_in_table, img_idx)
 
-        # We first detect all text regions by the OCR engine.
+        # We first detect all text regions by using the OCR engine.
         dt_boxes, elapse = self._ocr_engine.text_detector(img)
 
-        # Then do layout analysis by the structure engine.
+        # Then do layout analysis by using the structure engine.
         result = self._structure_engine(img, return_ocr_result_in_table, img_idx)
         for r in result:
             # Ignore tables since they are parsed separately by the internal table model.
@@ -831,7 +831,14 @@ class PPStructureX:
             r_dt_boxes = self._filter_boxes(dt_boxes, r['bbox'])
 
             # Perform OCR recognition on texts within the these regions.
-            ocr_result = self._ocr_engine.ocr(img, dt_boxes=r_dt_boxes)
+            ocr_result = self._ocr_engine.ocr(img,
+                                              det=self._args.det,
+                                              rec=self._args.rec,
+                                              cls=self._args.use_angle_cls,
+                                              bin=self._args.binarize,
+                                              inv=self._args.invert,
+                                              alpha_color=self._args.alphacolor,
+                                              dt_boxes=r_dt_boxes)
             if ocr_result:
                 ocr_r = ocr_result[0]
                 if ocr_r: # Sometimes ocr_r might be None.
@@ -852,6 +859,7 @@ class PPStructureX:
         return sorted_result
 
     def _filter_boxes(self, dt_boxes, bbox):
+        # TODO: Performance needs improvement?
         boxes = []
 
         for idx in range(len(dt_boxes)):
@@ -863,7 +871,6 @@ class PPStructureX:
         return np.array(boxes, np.float32).reshape((len(boxes), 4, 2))
 
     def _has_intersection(self, rect1, rect2):
-        # TODO: Performance needs improvement.
         xmin1, ymin1, xmax1, ymax1 = rect1
         xmin2, ymin2, xmax2, ymax2 = rect2
         if xmin1 > xmax2 or xmax1 < xmin2:
